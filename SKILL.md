@@ -1,6 +1,6 @@
 ---
 name: upload-markdown-to-lexiang
-version: "1.3.1"
+version: "1.3.2"
 author: ajaxhe
 license: MIT
 category: productivity
@@ -111,6 +111,19 @@ python3 "<skill-root>/scripts/lexiang_upload.py" upload article.md \
   📊/📖/💡 乐享 callout；`note` 可承载文章亮点列表。调用方禁止二次 MCP 修补。
   普通 blockquote 不受影响。
 - 非 Markdown 独立附件、视频和音频不属于本 Skill。
+
+## 页面写入不变量（重要）
+
+`execute_plan` 写入前，entry 必须为空（新建页初始 0 block；覆盖已有页时先
+`clear_existing_page`）。因此**所有片段（含首段）统一走
+`block_convert_content_to_blocks` → `block_create_block_descendant` 逐块写入**，
+不再对首段使用 `block_update_page` 的 `replace_content`。
+
+原因（2026-07-16 修复）：`replace_content` 对含多行引用块等结构的首段，会触发
+乐享服务端 round-trip 结构校验失败（报
+`replacement content is structurally unstable after round trip`），且此时页面
+已被 clear 清空 → 留下空壳 entry。改为 create_descendant 后同一内容可稳定写入，
+线上对账 verified=true。修改此处务必保持「写入前页面为空」这一前置条件。
 
 完整参数、JSON 输出和退出码见 [references/cli-contract.md](references/cli-contract.md)。
 

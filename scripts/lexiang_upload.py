@@ -636,7 +636,14 @@ def clear_existing_page(client: MCPClient, entry_id: str) -> None:
 
 
 def execute_plan(client: MCPClient, entry_id: str, plan: UploadPlan) -> None:
-    initialized = False
+    """按顺序写入所有片段。
+
+    前置条件：调用前 entry 必须已为空（新建页初始 0 block，或更新前已
+    clear_existing_page）。因此每个片段都统一走「convert→create_descendant」
+    这条稳健路径，不再对首段使用 block_update_page 的 replace_content ——
+    后者对含引用块/多结构的首段会触发服务端 round-trip 结构校验失败
+    （"structurally unstable after round trip"），是历史上文档同步失败的根因。
+    """
     for index, segment in enumerate(plan.segments):
         print(
             f"[{index + 1}/{len(plan.segments)}] {segment.kind}",
@@ -644,20 +651,10 @@ def execute_plan(client: MCPClient, entry_id: str, plan: UploadPlan) -> None:
             flush=True,
         )
         if segment.kind == "text":
-            if not initialized:
-                replace_page_text(client, entry_id, segment.value)
-                initialized = True
-            else:
-                append_page_text(client, entry_id, segment.value)
+            append_page_text(client, entry_id, segment.value)
         elif segment.kind == "image":
-            if not initialized:
-                replace_page_text(client, entry_id, "\u200b")
-                initialized = True
             upload_image(client, entry_id, Path(segment.value))
         else:
-            if not initialized:
-                replace_page_text(client, entry_id, "\u200b")
-                initialized = True
             append_callout(client, entry_id, segment.value, segment.icon)
 
 

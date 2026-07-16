@@ -418,7 +418,11 @@ class PlanTests(unittest.TestCase):
             with self.assertRaises(PreflightError):
                 build_plan("# Title\n\n![](../secret.png)", Path(directory))
 
-    def test_document_starting_with_image_initializes_page_before_upload(self) -> None:
+    def test_document_starting_with_image_uploads_without_replace_content(self) -> None:
+        """图片开头的文档：不再使用 replace_content 占位，直接按序 image→append。
+
+        前置约定：execute_plan 调用前 entry 已为空，因此无需首段 replace。
+        """
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image = root / "cover.png"
@@ -431,7 +435,29 @@ class PlanTests(unittest.TestCase):
                 patch("lexiang_upload.append_page_text", side_effect=lambda *_: events.append("append")),
             ):
                 execute_plan(object(), "entry", plan)
-            self.assertEqual(events, ["replace", "image", "append"])
+            self.assertEqual(events, ["image", "append"])
+            self.assertNotIn("replace", events)
+
+    def test_text_first_document_uses_create_descendant_not_replace(self) -> None:
+        """文本开头（含引用块）的文档：首段也走 append(create_descendant)，绝不 replace_content。
+
+        回归 2026-07-16 WAIC PR 稿故障：含多行引用块的首段经 replace_content
+        触发服务端 round-trip 结构校验失败。
+        """
+        plan = build_plan(
+            "# 标题\n\n> **草稿版本**：v0.4\n> **用途**：对外宣发\n\n正文一段。",
+            Path("."),
+        )
+        events = []
+        with (
+            patch("lexiang_upload.replace_page_text", side_effect=lambda *_: events.append("replace")),
+            patch("lexiang_upload.upload_image", side_effect=lambda *_: events.append("image")),
+            patch("lexiang_upload.append_page_text", side_effect=lambda *_: events.append("append")),
+        ):
+            execute_plan(object(), "entry", plan)
+        self.assertNotIn("replace", events)
+        self.assertTrue(all(e == "append" for e in events))
+        self.assertGreaterEqual(events.count("append"), 1)
 
     def test_large_table_is_split(self) -> None:
         table = "| Name |\n|---|\n" + "\n".join(f"| row-{index} |" for index in range(20))
