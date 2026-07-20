@@ -30,7 +30,7 @@ from lexiang_upload_core import (
 )
 
 
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 CLI_API = "1"
 CREDENTIAL_HELP_URL = "https://lexiangla.com/ai/claw"
 MCP_BASE_URL = "https://mcp.lexiang-app.com/mcp"

@@ -125,6 +125,18 @@ python3 "<skill-root>/scripts/lexiang_upload.py" upload article.md \
 已被 clear 清空 → 留下空壳 entry。改为 create_descendant 后同一内容可稳定写入，
 线上对账 verified=true。修改此处务必保持「写入前页面为空」这一前置条件。
 
+## 线上对账锚点（重要）
+
+`verify_remote` 用「长段落锚点」做线上对账：从源 Markdown 每行提取纯文本
+（≥80 字），`normalize_for_compare` 归一后检查是否为远程 clean 文本的子串。
+
+**列表项锚点必须去掉行首列表标记**（2026-07-20 修复）：乐享 round-trip 会把
+有序列表序号重编号（如 `1. 2. 3.` 全部变成 `1. 1. 1.`），序号本身不是稳定
+锚点。`_anchors` 在提取前用 `_LIST_PREFIX_RE` 去掉 `数字.` / `数字)` / `-` /
+`*` / `+` 行首标记，使锚点只依赖正文内容。修改此处时勿重新引入对列表序号的
+依赖，否则序号 ≥2 的列表项会在远程文本中找不到子串匹配而误判缺失
+（报 `缺少长段落锚点`）。
+
 完整参数、JSON 输出和退出码见 [references/cli-contract.md](references/cli-contract.md)。
 
 ## 修改与验证

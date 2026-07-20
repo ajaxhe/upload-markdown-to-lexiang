@@ -564,6 +564,39 @@ class VerificationTests(unittest.TestCase):
             self.assertEqual(verify_page(client, "entry", plan, attempts=2), (0, 0))
         self.assertEqual(client.clean_fetches, 2)
 
+    def test_anchor_survives_ordered_list_renumbering(self) -> None:
+        """乐享 round-trip 会把有序列表序号重编号（1.2.3.→1.1.1.），
+        锚点去掉行首列表标记后应仍能匹配，否则序号≥2 的列表项会误判缺失。"""
+        body = (
+            "1. **快速出原型 Demo**：基于知识库中的产品设计规范和历史设计稿，"
+            "让 WorkBuddy 快速生成前端原型，大幅缩短从想法到成品的交付周期。\n"
+            "2. **生成 PRD 初稿**：告诉 AI 需求背景和目标，它自动从知识库拉取"
+            "相关的用户调研和竞品数据，生成结构化的需求文档初稿而非从零写起。\n"
+        )
+        plan = build_plan(body, Path("."))
+        # 远程 clean 文本：乐享把 2. 重编号为 1.
+        remote = (
+            "1. **快速出原型 Demo**：基于知识库中的产品设计规范和历史设计稿，"
+            "让 WorkBuddy 快速生成前端原型，大幅缩短从想法到成品的交付周期。\n"
+            "1. **生成 PRD 初稿**：告诉 AI 需求背景和目标，它自动从知识库拉取"
+            "相关的用户调研和竞品数据，生成结构化的需求文档初稿而非从零写起。\n"
+        )
+        # 不应抛 VerificationError
+        verify_remote(plan, remote, remote, 0)
+
+    def test_anchor_strips_unordered_list_marker(self) -> None:
+        """无序列表项锚点去掉 `- ` 前缀后应能匹配远程文本。"""
+        body = (
+            "- **增加自动化校验逻辑**：在 Agent 工作流中插入检查点 Checkpoint，"
+            "让它跑完一步先自验结果正确性再进入下一步，这样 Agent 能跑得更久更稳。\n"
+        )
+        plan = build_plan(body, Path("."))
+        remote = (
+            "- **增加自动化校验逻辑**：在 Agent 工作流中插入检查点 Checkpoint，"
+            "让它跑完一步先自验结果正确性再进入下一步，这样 Agent 能跑得更久更稳。\n"
+        )
+        verify_remote(plan, remote, remote, 0)
+
 
 class FakeClient:
     def __init__(self, plan) -> None:

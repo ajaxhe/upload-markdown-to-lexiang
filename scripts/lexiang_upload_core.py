@@ -282,12 +282,19 @@ def _plain_text(markdown: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+_LIST_PREFIX_RE = re.compile(r"^(?:\d+[.)]|[-*+])\s+")
+
+
 def _anchors(markdown: str) -> tuple[str, ...]:
     anchors: list[str] = []
     for line in markdown.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith(("#", "!", "|", "<", "```")):
             continue
+        # 去掉行首有序/无序列表标记：乐享 round-trip 会把有序列表重编号
+        # （如 1. 2. 3. 全部变成 1.），序号本身不是稳定锚点，保留会导致
+        # 序号 ≥2 的列表项锚点在远程文本中找不到子串匹配而误判缺失。
+        stripped = _LIST_PREFIX_RE.sub("", stripped)
         plain = _plain_text(stripped)
         if len(plain) >= 80 and plain[:100] not in anchors:
             anchors.append(plain[:100])
