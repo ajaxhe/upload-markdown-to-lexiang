@@ -666,12 +666,33 @@ def remote_blocks(client: MCPClient, entry_id: str) -> list[dict]:
     return result.get("data", {}).get("blocks", [])
 
 
+def _entry_processing_status(client: MCPClient, entry_id: str) -> str | None:
+    """返回条目状态；解析失败或字段缺失时返回 None，调用方按『非 processing』处理。"""
+    try:
+        res = client.text("entry_describe_entry", {"entry_id": entry_id})
+        data = json.loads(res) if isinstance(res, str) else res
+        entry = (data.get("data") or {}).get("entry") or {}
+        status = entry.get("status")
+        if isinstance(status, dict):
+            return status.get("status")
+        return status
+    except Exception:
+        return None
+
+
 def verify_page(
     client: MCPClient,
     entry_id: str,
     plan: UploadPlan,
     attempts: int = 4,
 ) -> tuple[int, int]:
+    # 新建页面后乐享会进入 processing（索引/渲染）状态，此时 block_fetch_page
+    # 返回的 clean 文本可能不完整，导致 verify_remote 误报『callout 内容缺失 /
+    # 缺少长段落锚点』（VERIFY_ERROR）。先等页面离开 processing 再做对账。
+    for _ in range(20):
+        if _entry_processing_status(client, entry_id) != "processing":
+            break
+        time.sleep(3)
     for attempt in range(attempts):
         clean = client.text("block_fetch_page", {"entry_id": entry_id, "render_mode": "clean"})
         markdown = fetch_markdown(client, entry_id)
