@@ -547,7 +547,9 @@ def append_page_text(client: MCPClient, entry_id: str, addition: str) -> str:
     if children:
         arguments["children"] = children
     client.json("block_create_block_descendant", arguments)
-    return fetch_markdown(client, entry_id)
+    # 返回值未被调用方使用；不再在每段写后调用 block_fetch_page 读回，
+    # 避免网关临时缺失该工具时把「写后读回」误判为上传失败。
+    return addition
 
 
 def append_callout(client: MCPClient, entry_id: str, markdown: str, icon: str) -> None:
@@ -693,9 +695,18 @@ def verify_page(
         if _entry_processing_status(client, entry_id) != "processing":
             break
         time.sleep(3)
+    # 先做依赖 block_fetch_page 的完整文本对账；若网关临时缺失该工具，则降级为
+    # 结构性对账（仅用 block_list_block_children 统计图片/callout 数量）。
+    full_verify_available = True
     for attempt in range(attempts):
-        clean = client.text("block_fetch_page", {"entry_id": entry_id, "render_mode": "clean"})
-        markdown = fetch_markdown(client, entry_id)
+        try:
+            clean = client.text("block_fetch_page", {"entry_id": entry_id, "render_mode": "clean"})
+            markdown = fetch_markdown(client, entry_id)
+        except MCPError as exc:
+            if "tool not found" in str(exc) or "block_fetch_page" in str(exc):
+                full_verify_available = False
+                break
+            raise
         blocks = remote_blocks(client, entry_id)
         remote_images = count_remote_images(blocks)
         remote_callouts = count_remote_callouts(blocks)
@@ -706,6 +717,27 @@ def verify_page(
                 raise
             time.sleep(2**attempt)
             continue
+        return remote_images, remote_callouts
+    if not full_verify_available:
+        # 降级：block_fetch_page 不可用，仅做结构性对账（图片数、callout 数）。
+        blocks = remote_blocks(client, entry_id)
+        remote_images = count_remote_images(blocks)
+        remote_callouts = count_remote_callouts(blocks)
+        expected_images = len(plan.image_paths) + plan.remote_image_references
+        if remote_images != expected_images:
+            raise VerificationError(
+                f"图片数不一致（结构性校验，无 block_fetch_page）："
+                f"Markdown {expected_images}，线上 {remote_images}"
+            )
+        if remote_callouts != len(plan.callouts):
+            raise VerificationError(
+                f"callout 数不一致（结构性校验，无 block_fetch_page）："
+                f"本地 {len(plan.callouts)}，线上 {remote_callouts}"
+            )
+        print(
+            "⚠️ block_fetch_page 不可用，已降级为结构性校验（图片/callout 计数）",
+            file=sys.stderr,
+        )
         return remote_images, remote_callouts
     raise VerificationError("线上对账重试次数必须大于零")
 
