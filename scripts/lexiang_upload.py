@@ -262,6 +262,21 @@ class MCPClient:
                     raise AuthError(
                         f"乐享个人凭证无效、已过期或已撤销（401）。请访问 {CREDENTIAL_HELP_URL} 续期或重新获取"
                     ) from error
+                if error.code == 403 and "WAF" in detail:
+                    # 乐享侧 WAF 把请求体里的代码片段误判为攻击（与凭证无关）。
+                    # 常见触发：Python 代码块或正文中出现 os.system、__import__、
+                    # subprocess.run(...capture_output=True)、subprocess.check_output 等
+                    # 敏感模式；WAF 扫整个请求体，不区分是否在代码块内，且对空格
+                    # 归一化。skill 端无法让含敏感词的内容原样上传成功，故不预检
+                    # 黑名单（黑名单既不完整又会误报），仅在命中时给出可行动指引。
+                    raise MCPError(
+                        "乐享侧 WAF 拦截（HTTP 403，非凭证或代码问题）。"
+                        "请求体中的代码片段被误判为攻击，常见触发为 Python 代码块或"
+                        "正文含 os.system / __import__ / subprocess.check_output 等敏感"
+                        "模式（WAF 扫整个请求体，不区分代码块内外）。"
+                        "建议：将相关代码块截图作为图片上传，或反馈乐享侧为 MCP 写入"
+                        "接口加白名单。"
+                    ) from error
                 if error.code < 500 or attempt == self.retries - 1:
                     raise MCPError(f"MCP HTTP {error.code}: {detail[:300]}") from error
                 last_error = error

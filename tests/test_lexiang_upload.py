@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from unittest.mock import patch
+import urllib.error
 
 import sys
 
@@ -28,6 +29,8 @@ from lexiang_upload import (  # noqa: E402
     DEFAULT_CREDENTIALS,
     PROFILE_CREDENTIALS_DIR,
     CredentialSelector,
+    MCPClient,
+    MCPError,
     PersonalCredential,
     credentials_path,
     execute_plan,
@@ -41,6 +44,52 @@ from lexiang_upload import (  # noqa: E402
     upload,
     verify_page,
 )
+
+
+class WAFErrorTests(unittest.TestCase):
+    """403-WAF 命中时给出针对性行动指引，非 WAF 的 403 走原逻辑。"""
+
+    @staticmethod
+    def _http_error(code: int, body: str) -> urllib.error.HTTPError:
+        return urllib.error.HTTPError(
+            url="https://mcp.lexiang-app.com/mcp",
+            code=code,
+            msg="Forbidden",
+            hdrs=None,
+            fp=io.BytesIO(body.encode("utf-8")),
+        )
+
+    def test_waf_403_raises_actionable_message(self) -> None:
+        waf_html = "<!DOCTYPE html><html><title>WAF拦截页面</title></html>"
+        cred = PersonalCredential("lxmcp_test_token", "csig")
+        with patch("lexiang_upload.MCPClient._initialize", lambda self: None):
+            client = MCPClient(cred)
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.side_effect = self._http_error(403, waf_html)
+            with self.assertRaises(MCPError) as ctx:
+                client._post({"jsonrpc": "2.0", "method": "tools/call"})
+        msg = str(ctx.exception)
+        self.assertIn("WAF", msg)
+        self.assertIn("403", msg)
+        self.assertIn("代码片段", msg)
+        self.assertIn("os.system", msg)
+        # 不应把原始 HTML 倾倒给用户
+        self.assertNotIn("<!DOCTYPE", msg)
+        self.assertNotIn("WAF拦截页面", msg)
+
+    def test_non_waf_403_falls_back_to_generic_message(self) -> None:
+        body = '{"error":"forbidden resource"}'
+        cred = PersonalCredential("lxmcp_test_token", "csig")
+        with patch("lexiang_upload.MCPClient._initialize", lambda self: None):
+            client = MCPClient(cred)
+        with patch("urllib.request.urlopen") as mock_open:
+            mock_open.side_effect = self._http_error(403, body)
+            with self.assertRaises(MCPError) as ctx:
+                client._post({"jsonrpc": "2.0", "method": "tools/call"})
+        msg = str(ctx.exception)
+        self.assertIn("403", msg)
+        # 非 WAF 不应套用 WAF 指引话术
+        self.assertNotIn("代码片段", msg)
 
 
 class CredentialTests(unittest.TestCase):
