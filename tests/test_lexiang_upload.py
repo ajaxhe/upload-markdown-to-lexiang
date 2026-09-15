@@ -370,6 +370,55 @@ class SourceMetadataTests(unittest.TestCase):
         self.assertEqual(prepend_source_link(markdown, url, "Source"), markdown)
 
 
+class AnchorTests(unittest.TestCase):
+    """长锚点提取：源文链接行不参与对账。"""
+
+    SOURCE_URL = "https://lexiangla.com/pages/4efc27856f2c45928d46fbac2fd11531"
+    SOURCE_TITLE = "Tencent WorkBuddy Bench"
+    # 锚点阈值是 80 个字符，正文段落必须够长才会成为锚点
+    BODY = "正文锚点校验段落，用于确认长锚点提取规则。" * 5
+
+    def _anchors_for(self, markdown: str) -> tuple[str, ...]:
+        with tempfile.TemporaryDirectory() as workdir:
+            return build_plan(markdown, Path(workdir)).anchors
+
+    def test_source_link_line_is_not_used_as_anchor(self) -> None:
+        # 乐享把该行规范化成 <mention-page> 节点：链接文字变成页面 id、URL 变成相对路径，
+        # 因此含 URL 的锚点永远匹配不上，必须排除。
+        markdown = prepend_source_link(self.BODY, self.SOURCE_URL, self.SOURCE_TITLE)
+        anchors = self._anchors_for(markdown)
+        self.assertTrue(anchors)
+        self.assertTrue(all("原文链接" not in anchor for anchor in anchors))
+        self.assertTrue(all("lexiangla.com" not in anchor for anchor in anchors))
+
+    def test_body_lines_still_produce_anchors(self) -> None:
+        markdown = prepend_source_link(self.BODY, self.SOURCE_URL, self.SOURCE_TITLE)
+        self.assertIn(self.BODY[:100], self._anchors_for(markdown))
+
+
+class TableColumnLimitTests(unittest.TestCase):
+    """乐享单表列数上限 10 列，必须在预检阶段拦截。"""
+
+    def _plan_for(self, markdown: str):
+        with tempfile.TemporaryDirectory() as workdir:
+            return build_plan(markdown, Path(workdir))
+
+    def test_table_over_ten_columns_is_rejected(self) -> None:
+        header = "|" + "|".join(f"c{i}" for i in range(13)) + "|"
+        separator = "|" + "---|" * 13
+        row = "|" + "|".join("x" for _ in range(13)) + "|"
+        with self.assertRaises(PreflightError) as caught:
+            self._plan_for("\n".join([header, separator, row]))
+        self.assertIn("超过乐享单表上限", str(caught.exception))
+
+    def test_table_at_ten_columns_is_accepted(self) -> None:
+        header = "|" + "|".join(f"c{i}" for i in range(10)) + "|"
+        separator = "|" + "---|" * 10
+        row = "|" + "|".join("x" for _ in range(10)) + "|"
+        plan = self._plan_for("\n".join([header, separator, row]))
+        self.assertTrue(plan.segments)
+
+
 class MathConversionTests(unittest.TestCase):
     def test_converts_inline_and_display_math(self) -> None:
         converted, formulas = convert_math("A $K_V/\\rho$ value.\n\n$$\\Phi=n\\cdot d$$")

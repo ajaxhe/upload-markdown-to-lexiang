@@ -283,6 +283,11 @@ def _plain_text(markdown: str) -> str:
 
 
 _LIST_PREFIX_RE = re.compile(r"^(?:\d+[.)]|[-*+])\s+")
+# prepend_source_link 注入的源文链接行。乐享会把同站外链规范化成
+# <mention-page url="/pages/<id>"> 节点：链接文字被替换成页面 id、URL 变成相对路径，
+# 因此这一行的纯文本永远无法在远程文本中作为子串命中，不能参与长锚点对账
+# （2026-09-15 修复：曾导致 240 个锚点里稳定误报 1 个缺失）。
+_SOURCE_LINK_LINE_RE = re.compile(r"^(?:\*\*)?原文链接(?:\*\*)?\s*[：:]")
 
 
 def _anchors(markdown: str) -> tuple[str, ...]:
@@ -290,6 +295,8 @@ def _anchors(markdown: str) -> tuple[str, ...]:
     for line in markdown.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith(("#", "!", "|", "<", "```")):
+            continue
+        if _SOURCE_LINK_LINE_RE.match(stripped):
             continue
         # 去掉行首有序/无序列表标记：乐享 round-trip 会把有序列表重编号
         # （如 1. 2. 3. 全部变成 1.），序号本身不是稳定锚点，保留会导致
@@ -311,11 +318,38 @@ def _resolve_image(markdown_dir: Path, raw_path: str) -> Path:
     return candidate
 
 
+MAX_TABLE_COLUMNS = 10
+
+
+def check_table_columns(markdown: str, max_columns: int = MAX_TABLE_COLUMNS) -> None:
+    """乐享单表列数上限为 10 列，超限会在写入中途被服务端拒绝。
+
+    服务端报错 `column_size: value must be greater than 0 and less than or equal to 10`，
+    此时页面已被 clear 清空，会留下半成品 entry。因此必须在预检阶段拦截，
+    由调用方按列分组拆表（每张表保留第 0 列作为行标签列）。
+    2026-09-15 修复：此前无此检查，13 列表格在写入到第 36/37 段时才失败。
+    """
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("|") and stripped.endswith("|")):
+            continue
+        if re.fullmatch(r"[|:\-\s]+", stripped):
+            continue
+        columns = len(re.split(r"(?<!\\)\|", stripped.strip("|")))
+        if columns > max_columns:
+            raise PreflightError(
+                f"表格有 {columns} 列，超过乐享单表上限 {max_columns} 列。"
+                "请按列分组拆成多张表（每张保留首列作为行标签列）后重新上传；"
+                f"超限行示例：{stripped[:80]}"
+            )
+
+
 def build_plan(markdown: str, markdown_dir: Path, text_limit: int = 15_000) -> UploadPlan:
     if not markdown.strip():
         raise PreflightError("Markdown 为空")
     converted, formulas = convert_math(markdown)
     converted = split_large_gfm_tables(demote_caption_headings(converted))
+    check_table_columns(converted)
     callouts, callout_spans = parse_portable_callouts(converted)
     image_matches = [
         match

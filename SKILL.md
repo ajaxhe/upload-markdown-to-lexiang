@@ -1,6 +1,6 @@
 ---
 name: upload-markdown-to-lexiang
-version: "1.3.2"
+version: "1.3.3"
 author: ajaxhe
 license: MIT
 category: productivity
@@ -78,6 +78,13 @@ python3 "<skill-root>/scripts/lexiang_upload.py" upload article.md \
 `--credential-file`、`--profile`、`LEXIANG_UPLOAD_CREDENTIALS`、
 `LEXIANG_UPLOAD_PROFILE`、default；default 始终对应原有 `credentials.json`。
 
+> ⚠️ **上传前核对凭证租户（2026-09-15 坑）**：default `credentials.json` 的
+> `company_from` 可能不是目标知识库所在租户（例如被外链分享租户
+> `e6c565d6d16811efac17768586f8a025` 覆盖）。租户不匹配时父目录会报
+> `code 71 不存在ID为...的kb_entry资源`。遇到 code 71 先检查凭证
+> `company_from`；ajaxhe 个人知识库（csig 租户）上传固定使用
+> `--profile csig`。
+
 ## 上传
 
 创建新页面：
@@ -125,10 +132,27 @@ python3 "<skill-root>/scripts/lexiang_upload.py" upload article.md \
 已被 clear 清空 → 留下空壳 entry。改为 create_descendant 后同一内容可稳定写入，
 线上对账 verified=true。修改此处务必保持「写入前页面为空」这一前置条件。
 
+## 乐享平台硬限制（预检已覆盖）
+
+| 限制 | 表现 | 本 Skill 的处理 |
+|---|---|---|
+| 单表列数 ≤ 10 | 超限时服务端报 `column_size: ... less than or equal to 10`（code 51），**此时页面已被 clear 清空**，留下半成品 entry | `check_table_columns` 在预检阶段直接报错，要求调用方按列分组拆表（每张表保留第 0 列作行标签列） |
+| 单表行数 ≤ 10 | 平台自动分页 | `split_large_gfm_tables` 主动按 10 行切分并重复表头 |
+| 同站外链被改写 | `[标题](https://lexiangla.com/pages/xxx)` 在线上变成 `<mention-page url="/pages/xxx">xxx</mention-page>`：链接文字替换为条目 id、URL 变成相对路径 | 源文链接行不参与长锚点对账（见下） |
+
+调用方遇到「列数超限」时**不要**指望上传层自动拆表：按列拆表会改变文档结构，
+分组边界必须由了解表格语义的上层 Skill 决定。
+
 ## 线上对账锚点（重要）
 
 `verify_remote` 用「长段落锚点」做线上对账：从源 Markdown 每行提取纯文本
 （≥80 字），`normalize_for_compare` 归一后检查是否为远程 clean 文本的子串。
+
+**源文链接行不作为锚点**（2026-09-15 修复）：`prepend_source_link` 注入的
+`**原文链接**：[标题](url)` 行，在线上会被乐享规范化成页内引用节点
+（`<mention-page url="/pages/<id>">`），链接文字被替换成条目 id、URL 变成相对路径，
+因此该行纯文本（含原始 URL）永远无法命中远程文本，会让每次上传都稳定误报
+「缺少长段落锚点 1/N」。`_anchors` 用 `_SOURCE_LINK_LINE_RE` 跳过这一行。
 
 **列表项锚点必须去掉行首列表标记**（2026-07-20 修复）：乐享 round-trip 会把
 有序列表序号重编号（如 `1. 2. 3.` 全部变成 `1. 1. 1.`），序号本身不是稳定
