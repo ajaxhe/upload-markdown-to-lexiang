@@ -292,8 +292,18 @@ _SOURCE_LINK_LINE_RE = re.compile(r"^(?:\*\*)?原文链接(?:\*\*)?\s*[：:]")
 
 def _anchors(markdown: str) -> tuple[str, ...]:
     anchors: list[str] = []
+    # 2026-09-22 修复：围栏代码块（``` 含 mermaid）内容不参与锚点。代码块内的
+    # HTML 标签（如 mermaid 换行 <br/>）在源文侧被 _plain_text 整体删除、在
+    # 远端 clean 文本中却保留字面 "br" 字母（normalize_for_compare 不剥标签），
+    # 子串匹配必然失败，造成稳定误报（实测 6 锚点误报 1 个）。
+    in_fence = False
     for line in markdown.splitlines():
         stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         if not stripped or stripped.startswith(("#", "!", "|", "<", "```")):
             continue
         if _SOURCE_LINK_LINE_RE.match(stripped):

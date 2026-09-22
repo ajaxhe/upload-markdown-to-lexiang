@@ -1,6 +1,6 @@
 ---
 name: upload-markdown-to-lexiang
-version: "1.3.3"
+version: "1.4.0"
 author: ajaxhe
 license: MIT
 category: productivity
@@ -49,6 +49,15 @@ python3 "<skill-root>/scripts/lexiang_upload.py" --version
 上层 Skill 必须要求 `cli_api == "1"`，不得 import 内部 Python 模块。
 
 ## 首次配置个人凭证
+
+> 2026-09-22（v1.4.0）：乐享 MCP 服务端已切换为**网关模式**——`tools/list`
+> 只暴露 `call_tool`/`get_tool_schema`/`lexiang_fetch`/`lexiang_search`/
+> `list_tool_categories`/`search_tools`/`whoami` 7 个元工具，业务工具
+> （`entry_*`/`block_*`）直呼 `tools/call` 会被拒：`tool is not allowed:
+> <tool>`。本 Skill 的 `MCPClient._request` 已内置自动回退：直呼失败且报
+> `tool is not allowed` 时，改经 `call_tool` 元工具以
+> `{"tool_name": <tool>, "arguments": {...}}` 转发，业务返回结构不变。
+> 旧版直连服务端（直呼成功）行为不变。
 
 页面提供的凭证是 `lxmcp_` 前缀 MCP API Token 和 `company_from`。本 Skill
 直接使用 `Authorization: Bearer <lxmcp_token>`，不做 OAuth token 交换。
@@ -153,6 +162,13 @@ python3 "<skill-root>/scripts/lexiang_upload.py" upload article.md \
 （`<mention-page url="/pages/<id>">`），链接文字被替换成条目 id、URL 变成相对路径，
 因此该行纯文本（含原始 URL）永远无法命中远程文本，会让每次上传都稳定误报
 「缺少长段落锚点 1/N」。`_anchors` 用 `_SOURCE_LINK_LINE_RE` 跳过这一行。
+
+**围栏代码块内容不作为锚点**（2026-09-22 修复）：``` 围栏（含 mermaid）内
+的长行不参与对账。代码块内的 HTML 标签（如 mermaid 换行 `<br/>`）在源文侧
+被 `_plain_text` 整体删除、在远端 clean 文本中却保留字面 "br" 字母
+（`normalize_for_compare` 不剥 HTML 标签），子串匹配必然失败。实测含时序图
+的文档 6 个锚点稳定误报缺失 1 个。`_anchors` 以 ``` 行开关 `in_fence` 状态，
+跳过围栏内的所有行。
 
 **列表项锚点必须去掉行首列表标记**（2026-07-20 修复）：乐享 round-trip 会把
 有序列表序号重编号（如 `1. 2. 3.` 全部变成 `1. 1. 1.`），序号本身不是稳定

@@ -30,7 +30,7 @@ from lexiang_upload_core import (
 )
 
 
-VERSION = "1.3.2"
+VERSION = "1.4.0"
 CLI_API = "1"
 CREDENTIAL_HELP_URL = "https://lexiangla.com/ai/claw"
 MCP_BASE_URL = "https://mcp.lexiang-app.com/mcp"
@@ -303,14 +303,32 @@ class MCPClient:
         )
 
     def _request(self, tool: str, arguments: dict) -> dict:
-        return self._post(
-            {
-                "jsonrpc": "2.0",
-                "id": uuid.uuid4().hex,
-                "method": "tools/call",
-                "params": {"name": tool, "arguments": arguments},
-            }
-        )
+        request = {
+            "jsonrpc": "2.0",
+            "id": uuid.uuid4().hex,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        }
+        try:
+            return self._post(request)
+        except MCPError as error:
+            # 2026-09-22：乐享 MCP 服务端切换为网关模式，tools/list 只暴露
+            # call_tool 等 7 个元工具，业务工具（entry_*/block_*）直呼会报
+            # "tool is not allowed: <tool>"。此时改走 call_tool 元工具转发，
+            # 业务工具的返回结构不变。直呼成功（旧版服务端）时行为不变。
+            if "tool is not allowed" not in str(error):
+                raise
+            return self._post(
+                {
+                    "jsonrpc": "2.0",
+                    "id": uuid.uuid4().hex,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "call_tool",
+                        "arguments": {"tool_name": tool, "arguments": arguments},
+                    },
+                }
+            )
 
     def text(self, tool: str, arguments: dict) -> str:
         result = self._request(tool, arguments)

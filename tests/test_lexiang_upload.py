@@ -395,6 +395,29 @@ class AnchorTests(unittest.TestCase):
         markdown = prepend_source_link(self.BODY, self.SOURCE_URL, self.SOURCE_TITLE)
         self.assertIn(self.BODY[:100], self._anchors_for(markdown))
 
+    def test_fenced_code_block_lines_are_not_used_as_anchors(self) -> None:
+        """围栏代码块（含 mermaid）内容不参与锚点。
+
+        代码块内的 HTML 标签（如 mermaid 换行 <br/>）在源文侧被 _plain_text
+        整体删除、在远端 clean 文本中保留字面 "br" 字母（normalize_for_compare
+        不剥标签），子串匹配必然失败。2026-09-22 修复：曾导致含时序图的文档
+        6 个锚点稳定误报缺失 1 个。
+        """
+        mermaid = (
+            "```mermaid\n"
+            "sequenceDiagram\n"
+            "    L->>C: premissionFileDecryptionRest<br/>body=密文流 · "
+            "data~counSize · data~unitNames=采集账号\n"
+            "```\n"
+        )
+        markdown = mermaid + self.BODY
+        anchors = self._anchors_for(markdown)
+        self.assertIn(self.BODY[:100], anchors)
+        self.assertFalse(
+            any("premissionFileDecryptionRest" in anchor for anchor in anchors),
+            "代码块内的长行不应成为锚点",
+        )
+
 
 class TableColumnLimitTests(unittest.TestCase):
     """乐享单表列数上限 10 列，必须在预检阶段拦截。"""
