@@ -392,9 +392,22 @@ def build_plan(markdown: str, markdown_dir: Path, text_limit: int = 15_000) -> U
     )
 
 
+_URL_RE = re.compile(r"https?://[^\s)\]<>，。；、\"']+", re.IGNORECASE)
+
+
 def normalize_for_compare(text: str) -> str:
     text = text.replace("\\", "").replace("_", "")
     text = re.sub(r"\$`([^`]+)`\$", r"\1", text)
+    # 1) 解开 markdown 链接/图片语法，只保留显示文字
+    text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    # 2) 去掉 URL 本体再做比对。
+    #    同一段文字在源文里可能是裸 URL（出现 1 次），在乐享 clean 文本里会被渲染成
+    #    [url](url)（出现 2 次）；只解开链接语法的话，反向情形（源文是 markdown 链接、
+    #    线上只留显示文字）又会因为 _plain_text 保留了 URL 而对不上。
+    #    两侧都忽略 URL 本体即可让四个方向都稳定命中：段落完整性由正文文字来保证，
+    #    URL 本身不作为判据。
+    text = _URL_RE.sub(" ", text)
     text = re.sub(r"\s+", " ", text)
     return re.sub(r"[^\w\u3400-\u9fff]+", "", text, flags=re.UNICODE).lower()
 
@@ -411,7 +424,14 @@ def verify_remote(
     missing_headings = [heading for heading in plan.headings if normalize_for_compare(heading) not in normalized_remote]
     if missing_headings:
         problems.append("缺少标题：" + "；".join(missing_headings[:5]))
-    missing_anchors = [anchor for anchor in plan.anchors if normalize_for_compare(anchor) not in normalized_remote]
+    missing_anchors = []
+    for anchor in plan.anchors:
+        normalized_anchor = normalize_for_compare(anchor)
+        # 归一化后过短（例如整段几乎只有 URL）时不具备判定力，跳过而不是误报缺失
+        if len(normalized_anchor) < 10:
+            continue
+        if normalized_anchor not in normalized_remote:
+            missing_anchors.append(anchor)
     if missing_anchors:
         preview = "；".join(missing_anchors[:3])
         problems.append(

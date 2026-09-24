@@ -177,6 +177,16 @@ python3 "<skill-root>/scripts/lexiang_upload.py" upload article.md \
 依赖，否则序号 ≥2 的列表项会在远程文本中找不到子串匹配而误判缺失
 （报 `缺少长段落锚点`）。
 
+**锚点比对忽略 URL 本体**（2026-09-24 修复）：`normalize_for_compare` 先解开
+markdown 链接/图片语法（只留显示文字），再把 `http(s)://…` 的 URL 本体整体删掉。
+原因是同一个 URL 在两侧的呈现可能不同：源文里是裸 URL（出现 1 次），乐享 clean
+文本会把它渲染成 `[url](url)`（出现 2 次）；反之源文写作 `[文字](url)` 时
+`_plain_text` 会保留 URL，而线上可能只留显示文字。任一侧不一致，子串匹配就必然
+失败——表现为每次上传都 `VERIFY_ERROR: 缺少长段落锚点 n/N`，且因 `verified≠true`
+不进 manifest，同一篇文档会被无限重传。实测案例：一篇正文含
+`访问 knot：https://knot.woa.com/...` 的文章稳定误报。段落完整性改由正文文字
+保证；归一化后长度 < 10 的锚点（整段几乎只有 URL）直接跳过，不误报缺失。
+
 完整参数、JSON 输出和退出码见 [references/cli-contract.md](references/cli-contract.md)。
 
 ## 修改与验证

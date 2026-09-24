@@ -418,6 +418,52 @@ class AnchorTests(unittest.TestCase):
             "代码块内的长行不应成为锚点",
         )
 
+    def test_bare_url_linkified_remotely_is_not_a_missing_anchor(self) -> None:
+        """源文裸 URL 在线上被渲染成 [url](url) 时，锚点不应误报缺失。
+
+        乐享 clean 文本会把裸 URL 链接化为 [url](url)（URL 因此出现两次），
+        而锚点里 URL 只出现一次，归一化后子串匹配必然失败 —— 表现为每次上传都
+        VERIFY_ERROR「缺少长段落锚点」，且因未写入 manifest 而被反复重传。
+        2026-09-24 修复：normalize_for_compare 先解开 markdown 链接/图片语法。
+        """
+        url = "https://knot.woa.com/skills/detail/72839"
+        paragraph = (
+            'WorkBuddy 支持通过"技能（Skill）"扩展能力，司内有个技能市场 knot，'
+            f"访问 knot：{url}，一键安装。这段文字足够长，以便被选作长段落锚点。"
+        )
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(plan.anchors, "长段落应产生锚点")
+        remote_clean = paragraph.replace(url, f"[{url}]({url})")
+        # 不应抛 VerificationError
+        verify_remote(plan, remote_clean, remote_clean, 0, 0)
+
+    def test_missing_link_target_paragraph_still_fails_verification(self) -> None:
+        """反向保护：归一化放宽后，真正缺失的段落仍必须报错（不能静默通过）。"""
+        paragraph = (
+            "这是一段刻意写得很长的正文段落，用于确认链接语法归一化并没有把缺失检测一并放宽。"
+            "锚点匹配依然要求线上正文里真的存在对应内容，而不是只要线上有任意文字就算通过。"
+            "这里继续补充若干句子，确保段落长度稳定超过锚点门槛，避免测试因为长度不足而失效。"
+        )
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(plan.anchors, "长段落应产生锚点")
+        with self.assertRaises(VerificationError):
+            verify_remote(plan, "完全不相干的线上内容", "完全不相干的线上内容", 0, 0)
+
+    def test_markdown_link_in_anchor_matches_remote_display_text_only(self) -> None:
+        """源文是 [文字](url)、线上只保留显示文字时，也应命中。"""
+        paragraph = (
+            "参考 [配置指南](https://example.com/docs) 的第三小节，即可完成全部配置流程；"
+            "如果中途遇到权限相关的报错，请回到第一步重新确认凭证是否已经授权完成。"
+            "这段文字同样是刻意写长的，用来确保它稳定落在长段落锚点的选取范围之内。"
+        )
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(plan.anchors, "长段落应产生锚点")
+        remote_clean = paragraph.replace("[配置指南](https://example.com/docs)", "配置指南")
+        verify_remote(plan, remote_clean, remote_clean, 0, 0)
+
 
 class TableColumnLimitTests(unittest.TestCase):
     """乐享单表列数上限 10 列，必须在预检阶段拦截。"""
