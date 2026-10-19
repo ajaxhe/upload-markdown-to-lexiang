@@ -429,7 +429,7 @@ class AnchorTests(unittest.TestCase):
         url = "https://knot.woa.com/skills/detail/72839"
         paragraph = (
             'WorkBuddy 支持通过"技能（Skill）"扩展能力，司内有个技能市场 knot，'
-            f"访问 knot：{url}，一键安装。这段文字足够长，以便被选作长段落锚点。"
+            f"访问 knot：{url}，一键安装。这段文字足够长，以便被选作长段落锚点，不依赖网址本身的长度。"
         )
         with tempfile.TemporaryDirectory() as workdir:
             plan = build_plan(paragraph, Path(workdir))
@@ -463,6 +463,79 @@ class AnchorTests(unittest.TestCase):
         self.assertTrue(plan.anchors, "长段落应产生锚点")
         remote_clean = paragraph.replace("[配置指南](https://example.com/docs)", "配置指南")
         verify_remote(plan, remote_clean, remote_clean, 0, 0)
+
+    def test_https_urls_with_underscores_do_not_leave_query_residue(self) -> None:
+        """带下划线的 https 链接必须整段从锚点消失。
+
+        乐享 clean 文本会保留 [文字](https://...)，归一化时先删下划线再识别整段 URL。
+        锚点若先把 _ 换成空格，URL 被拆开，查询串会残留，对账稳定误报。
+        """
+        profile = "https://every.to/@naveen_6804?utm_cta_source=p_how_codex_happened_naveen_naidu_1"
+        paragraph = (
+            "In Codex, GPT-5 was fast, and it seemed smart. One of our most technical engineers, "
+            f"[Naveen Naidu]({profile}), had used it to track down a mysterious freeze for days."
+        )
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(plan.anchors, "长段落应产生锚点")
+        for anchor in plan.anchors:
+            self.assertNotIn("utm", anchor)
+            self.assertNotIn("every.to", anchor)
+            self.assertNotIn("6804", anchor)
+        verify_remote(plan, paragraph, paragraph, 0, 0)
+
+    def test_relative_cite_href_survives_to_match_remote(self) -> None:
+        """双括号相对脚注的 href 会留在乐享 clean 文本里，锚点不能先把它删掉。"""
+        cite = (
+            "/p/how-codex-happened/interviews/tibo/"
+            "?cite=research-start-december"
+            "&utm_cta_source=p_how_codex_happened_building_the_builders_cite_research_start_december"
+            "#final-20261015-0012"
+        )
+        paragraph = (
+            "“I got involved with coding agents around December 2024,”"
+            f"[[5]]({cite}) he told me. We were sitting in the OpenAI cafeteria with a slice of pizza."
+        )
+        remote_clean = paragraph.replace("[[5]]", r"[\[5\]]")
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(plan.anchors, "长段落应产生锚点")
+        self.assertTrue(any("/p/" in anchor for anchor in plan.anchors))
+        verify_remote(plan, remote_clean, remote_clean, 0, 0)
+
+    def test_single_bracket_relative_link_drops_href(self) -> None:
+        """单括号相对链接在线上会被解开成显示文字，锚点里不能留下查询串。"""
+        href = (
+            "/p/how-codex-happened/interviews/alex/"
+            "?cite=awkward-revisit&utm_cta_source=p_how_codex_happened_cite_awkward"
+            "#final-20261015-0003"
+        )
+        paragraph = (
+            "There were good reasons to stay in the editor after the model launched, "
+            "and usage grew more than 10-fold by last October. "
+            f"[This made what I had come to say a little awkward.]({href}) "
+            "Every had begun to build a reputation for testing new AI models on real work."
+        )
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(plan.anchors)
+        for anchor in plan.anchors:
+            self.assertNotIn("/p/", anchor)
+            self.assertNotIn("utm", anchor)
+        verify_remote(plan, paragraph, paragraph, 0, 0)
+
+    def test_https_url_strip_does_not_eat_the_next_link_label(self) -> None:
+        """URL 字符集不能包含括号，否则会把紧挨着的下一个链接文字吞进 URL。"""
+        url = "https://stratechery.com/2025/an-interview-with-openai-ceo-sam-altman-about-devday-and-the-ai-buildout/"
+        paragraph = (
+            "“在某种意义上，OpenAI 是在押注一连串创业公司，只是它们都在内部，”"
+            f"Altman 在[2025 年接受]({url})[Ben Thompson 的采访]({url})时说。"
+            "公司内部这种并行探究，有时让人觉得混乱而浪费，给探索留空间和搞成一团乱只有一条细线。"
+        )
+        with tempfile.TemporaryDirectory() as workdir:
+            plan = build_plan(paragraph, Path(workdir))
+        self.assertTrue(any("Ben Thompson" in anchor for anchor in plan.anchors))
+        verify_remote(plan, paragraph, paragraph, 0, 0)
 
 
 class TableColumnLimitTests(unittest.TestCase):

@@ -274,10 +274,26 @@ def demote_caption_headings(markdown: str) -> str:
     return CAPTION_HEADING_RE.sub(r"\1", markdown)
 
 
+# 乐享 clean 文本对链接目标有两种形态，锚点必须在把 _、# 换成空格之前分开处理：
+# 1. https URL，以及单括号相对链接 [文字](/p/...)：归一化会整段丢掉目标。
+#    若先把 _ 换成空格，查询串会拆碎并残留。
+# 2. 双括号脚注 [[n]](/p/...?utm_...#...)：线上会转义成 [\[n\]](/p/...)，
+#    解不开，href 会留在 clean 文本里，锚点必须保留，再交给归一化去掉 _ 和标点。
+# https 的终止符与 _URL_RE 一致，不能把 ()[] 算进 URL，否则会吞掉下一个链接文字。
+# 2026-10-19。
+_ANCHOR_HTTPS_RE = re.compile(
+    r"https?://[^\s)\]<>，。；、\"']+",
+    re.IGNORECASE,
+)
+_ANCHOR_RELATIVE_LINK_RE = re.compile(r"(?<!\])\]\(/[^)\s]+\)")
+
+
 def _plain_text(markdown: str) -> str:
     text = IMAGE_RE.sub("", markdown)
     text = re.sub(r"```[\s\S]*?```", "", text)
     text = re.sub(r"<[^>]+>", "", text)
+    text = _ANCHOR_HTTPS_RE.sub(" ", text)
+    text = _ANCHOR_RELATIVE_LINK_RE.sub("]", text)
     text = re.sub(r"[#>*_~`\[\]()|\\$^{}]", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
